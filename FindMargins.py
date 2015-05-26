@@ -133,6 +133,16 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     self.contourIn4D.toolTip = "Select if selected contour was already deliniated in 4D CT (it will skip the planning registration."
     parametersFormLayout.addRow("Contour deliniated in 4D: ",self.contourIn4D)
 
+    
+    #
+    # Select reference phase:
+    #
+    
+    self.refPhaseSpinBox = qt.QSpinBox()     
+    self.refPhaseSpinBox.setToolTip( "Reference phase to base registration and mid ventilation." )
+    self.refPhaseSpinBox.setValue(6)
+    self.refPhaseSpinBox.setRange(0, 9)
+    parametersFormLayout.addRow("Reference phase:", self.refPhaseSpinBox)
     #
     # Do registration
     #
@@ -161,6 +171,21 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     self.midVButton.toolTip = "Creates the Mid ventilation CT from 4DCT and registration files."
     self.midVButton.enabled = True
     parametersFormLayout.addRow(self.midVButton)
+
+    #
+    # Table with amplitudes
+    #
+
+    self.table = qt.QTableWidget()
+    self.table.setColumnCount(3)
+    self.table.setHorizontalHeaderLabels(["L-R","A-P","I-S"])
+    self.table.setRowCount(2)
+    self.table.setVerticalHeaderLabels(["Max","Min"])
+    self.table.setEditTriggers(qt.QAbstractItemView.NoEditTriggers)
+    # self.table.enabled = False
+    parametersFormLayout.addRow(self.table)
+
+
 
     # connections
     self.applyButton.connect('clicked(bool)', self.onApplyButton)
@@ -206,11 +231,21 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
 
     # logic.run(patientNumber,seriesNumber,self.inputSelector.currentNode())
 
-    logic.run(patient, skipPlanRegistration)
+    maxminAmplitudes = logic.run(patient, skipPlanRegistration, self.refPhaseSpinBox.value)
+    print maxminAmplitudes
 
-    # print patient.planCTID
-    # print patient.structureSetUID
-    # print patient.fourDCTUID
+    if not maxminAmplitudes:
+        print "Can't get amplitudes."
+        return
+    self.item={}
+    n = 0
+    for i in range(0,2):
+        for j in range(0,3):
+            self.item[n] = qt.QTableWidgetItem()
+            self.item[n].setText(str(round(maxminAmplitudes[i][j], 2)))
+            self.table.setItem(i, j, self.item[n])
+            n += 1
+
 
   def onLoadDicomButton(self):
     patientNumber = self.patientComboBox.currentIndex
@@ -237,7 +272,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
       print "Can't find patient."
       return
 
-    logic.register(patient)
+    logic.register(patient, self.refPhaseSpinBox.value)
 
   def onMidVButton(self):
     logic = FindMarginsLogic()
@@ -248,7 +283,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
       print "Can't find patient."
       return
 
-    logic.createMidVentilation(patient)
+    logic.createMidVentilation(patient, self.refPhaseSpinBox.value)
 
   def getPatientList(self):
 
@@ -335,9 +370,8 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
   """
 
 
-  def register(self,patient):
+  def register(self,patient, referencePosition = 6):
 
-    referencePosition = 6
 
     dicomDir = os.path.dirname(patient.fourDCT[referencePosition].file)
     vectorDir = dicomDir + "/VectorFields/"
@@ -366,8 +400,8 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       patient.regParameters.referenceNumber = str(referencePosition) + "0"
       patient.regParameters.referenceNode = patient.fourDCT[referencePosition].node.GetID()
       patient.regParameters.register()
-      slicer.mrmlScene.RemoveNode(patient.fourDCT[10].node)
-      patient.fourDCT[10].node = None
+      # slicer.mrmlScene.RemoveNode(patient.fourDCT[10].node)
+      # patient.fourDCT[10].node = None
 
     # Prepare everything for 4D registration
     patient.create4DParameters(referencePosition,vectorDir)
@@ -405,23 +439,22 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     return
 
 
-  def run(self, patient, skipPlanRegistration):
+  def run(self, patient, skipPlanRegistration, referencePosition):
     """
     Run the actual algorithm
     """
     from vtkSlicerContoursModuleMRML import vtkMRMLContourNode
     transformLogic = slicer.modules.transforms.logic()
 
-
     logging.info('Processing started')
 
     origins = {}
     relOrigins = {}
+    minmaxAmplitudes = [[0,0,0],[0,0,0]]
+
     transform = None
 
-    # Load reference phase
-
-    referencePosition = 6
+    showContours = False
 
     # Set vector directory
 
@@ -434,12 +467,11 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         contour = patient.fourDCT[10].contour
     else:
         #Propagate contour
-        patient.createPlanParameters(referencePosition,vectorDir)
+        patient.createPlanParameters(referencePosition, vectorDir)
 
         if not patient.getTransform(10):
           print "Can't load transform"
-          return
-
+          return None
 
         transform = vtk.vtkGeneralTransform()
 
@@ -451,12 +483,12 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         contour = vtkMRMLContourNode()
         contour.DeepCopy(patient.fourDCT[10].contour)
 
-        print "Non go"
-
         contour.SetName(patient.fourDCT[10].contour.GetName() + "_refPosition")
 
         slicer.mrmlScene.AddNode(contour)
-        self.setDisplayNode(contour)
+
+        if showContours:
+          self.setDisplayNode(contour)
 
         print contour.GetID()
         print patient.fourDCT[10].contour.GetID()
@@ -465,11 +497,8 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         print contour.GetTransformNodeID()
         if not transformLogic.hardenTransform(contour):
             print "Can't harden transform."
-            return
+            return None
         #
-
-
-
         # slicer.mrmlScene.RemoveNode(bsplinePlan)
 
     patient.fourDCT[referencePosition].contour = contour
@@ -481,6 +510,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     patient.create4DParameters(referencePosition,vectorDir)
     for i in range(0,10):
+      print "We are at phase " + str(i)
       if i == referencePosition:
         print origins[i]
         print relOrigins[i]
@@ -503,11 +533,13 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       slicer.mrmlScene.AddNode(contour)
       contour.DeepCopy(patient.fourDCT[referencePosition].contour)
       contour.SetName(patient.fourDCT[referencePosition].contour.GetName() + "_phase" + str(i))
-      self.setDisplayNode(contour)
+      if showContours:
+        self.setDisplayNode(contour)
 
       contour.SetAndObserveTransformNodeID(patient.fourDCT[i].transform.GetID())
       if not transformLogic.hardenTransform(contour):
           print "Can't harden transform for phase: " + str(i) + "0 %"
+          continue
 
       patient.fourDCT[i].contour = contour
 
@@ -515,7 +547,12 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       relOriginsTmp = [0,0,0]
       for j in range(0,3):
         relOriginsTmp[j] = origins[i][j] - origins[referencePosition][j]
+        if relOriginsTmp[j] > minmaxAmplitudes[0][j]:
+            minmaxAmplitudes[0][j] = relOriginsTmp[j]
+        elif relOriginsTmp[j] < minmaxAmplitudes[1][j]:
+            minmaxAmplitudes[1][j] = relOriginsTmp[j]
       relOrigins[i] = relOriginsTmp
+
 
       print origins[i]
       print relOrigins[i]
@@ -563,31 +600,18 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     cvn.SetChartNodeID(cn.GetID())
     logging.info('Processing completed')
 
-    return True
+    return minmaxAmplitudes
 
-  def createMidVentilation(self,patient):
-
-
-    self.createAverageFrom4DCT(patient)
-    #
-    return
-
-
+  def createMidVentilation(self,patient, referencePosition = 6):
+    transformLogic = slicer.modules.transforms.logic()
     mathMultiply = vtk.vtkImageMathematics()
     mathAddVector = vtk.vtkImageMathematics()
     mathAddCT = vtk.vtkImageMathematics()
 
     vectorImageData = vtk.vtkImageData()
-    displacmentGridImageData = vtk.vtkImageData()
     ctImageData = vtk.vtkImageData()
 
-    gridTransform = slicer.vtkOrientedGridTransform()
-
-    exportVector = True
-
-
-
-    referencePosition = 6
+    gridAverageTransform = slicer.vtkOrientedGridTransform()
 
     dicomDir = os.path.dirname(patient.fourDCT[referencePosition].file)
     vectorDir = dicomDir + "/VectorFields/"
@@ -597,8 +621,10 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     print "Starting process"
 
     firstRun = True
-
+    # vector = slicer.vtkMRMLVectorVolumeNode()
+    # slicer.mrmlScene.AddNode(vector)
     for i in range(0, 10):
+
         if i == referencePosition:
             continue
 
@@ -616,7 +642,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
 
         vectorField = patient.fourDCT[i].vectorField
-        mathMultiply.SetInput1Data( vectorField.GetImageData())
+        mathMultiply.SetInput1Data(vectorField.GetImageData())
         mathMultiply.Modified()
         mathMultiply.Update()
 
@@ -626,7 +652,11 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
             matrix = vtk.vtkMatrix4x4()
             vectorField.GetIJKToRASDirectionMatrix(matrix)
-            gridTransform.SetGridDirectionMatrix(matrix)
+            gridAverageTransform.SetGridDirectionMatrix(matrix)
+
+            # vector.SetOrigin(vectorField.GetOrigin())
+            # vector.SetSpacing(vectorField.GetSpacing())
+            # vector.SetIJKToRASDirectionMatrix(matrix)
 
             firstRun = False
         else:
@@ -643,64 +673,74 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         patient.fourDCT[i].vectorField = None
 
 
-      # vector = slicer.vtkMRMLVectorVolumeNode()
-      # slicer.mrmlScene.AddNode(vector)
-      # print vector.GetID()
-      #
-      # vector.SetAndObserveImageData(vectorImageData)
+
+    # print vector.GetID()
+    #
+    # vector.SetAndObserveImageData(vectorImageData)
+    gridAverageTransform.SetDisplacementGridData(vectorImageData)
+    gridAverageTransform.SetInterpolationModeToCubic()
+    gridAverageTransform.Inverse()
+    gridAverageTransform.Update()
+    transformNode = slicer.vtkMRMLGridTransformNode()
+    slicer.mrmlScene.AddNode(transformNode)
+    transformNode.SetAndObserveTransformFromParent(gridAverageTransform)
+    # return
 
 
 
     midVCT = slicer.vtkMRMLScalarVolumeNode()
     slicer.mrmlScene.AddNode(midVCT)
-    midVCT.SetName(patient.name + "_midV")
+    midVCT.SetName(patient.name + "_midV_ref"+str(referencePosition))
 
 
     firstRun = True
     for i in range(0, 10):
         print "Propagating phase " + str(i) + "0 % to midV position."
-        if i == referencePosition:
-            displacmentGridImageData.ShallowCopy(vectorImageData)
-            # if exportVector:
-            #     gridTransform.SetDisplacementGridData(vectorImageData)
-            #     gridTransform.SetInterpolationModeToCubic()
-            #     gridTransform.Inverse()
-            #     gridTransform.Update()
-            #     transformNode = slicer.vtkMRMLGridTransformNode()
-            #     slicer.mrmlScene.AddNode(transformNode)
-            #     transformNode.SetAndObserveTransformFromParent(gridTransform)
-
-        else:
-            mathMultiply.SetOperationToSubtract()
-            if not patient.getVectorField(i):
-              print "Can't get vector field for phase " + str(i) + "0 %"
-              continue
-
-            vectorField = patient.fourDCT[i].vectorField
-            mathMultiply.SetInput1Data(vectorImageData)
-            mathMultiply.SetInput2Data(vectorField.GetImageData())
-            mathMultiply.Modified()
-            mathMultiply.Update()
-            displacmentGridImageData.DeepCopy(mathMultiply.GetOutput())
-
-        print displacmentGridImageData.GetOrigin()
-
-
-        gridTransform.SetDisplacementGridData(displacmentGridImageData)
-        gridTransform.SetInterpolationModeToCubic()
+        patient.regParameters.referenceNumber = str(i) + "0"
+        # if i == referencePosition:
+        #     displacmentGridImageData.ShallowCopy(vectorImageData)
+        #     # if exportVector:
+        #     #     gridTransform.SetDisplacementGridData(vectorImageData)
+        #     #     gridTransform.SetInterpolationModeToCubic()
+        #     #     gridTransform.Inverse()
+        #     #     gridTransform.Update()
+        #     #     transformNode = slicer.vtkMRMLGridTransformNode()
+        #     #     slicer.mrmlScene.AddNode(transformNode)
+        #     #     transformNode.SetAndObserveTransformFromParent(gridTransform)
+        #
+        # else:
+        #     mathMultiply.SetOperationToSubtract()
+        #     if not patient.getVectorField(i):
+        #       print "Can't get vector field for phase " + str(i) + "0 %"
+        #       continue
+        #
+        #     vectorField = patient.fourDCT[i].vectorField
+        #     mathMultiply.SetInput1Data(vectorImageData)
+        #     mathMultiply.SetInput2Data(vectorField.GetImageData())
+        #     mathMultiply.Modified()
+        #     mathMultiply.Update()
+        #     displacmentGridImageData.DeepCopy(mathMultiply.GetOutput())
+        #
+        # print displacmentGridImageData.GetOrigin()
+        #
+        #
+        # gridTransform.SetDisplacementGridData(displacmentGridImageData)
+        # gridTransform.SetInterpolationModeToCubic()
         # gridTransform.Inverse()
-        gridTransform.Update()
-        if exportVector and i == referencePosition:
-            transformNode = slicer.vtkMRMLGridTransformNode()
-            slicer.mrmlScene.AddNode(transformNode)
-            transformNode.SetAndObserveTransformFromParent(gridTransform)
-
-            vv = slicer.vtkMRMLVectorVolumeNode()
-            vv.SetSpacing(displacmentGridImageData.GetSpacing())
-            vv.SetOrigin(displacmentGridImageData.GetOrigin())
-            vv.SetIJKToRASDirectionMatrix(matrix)
-            vv.SetAndObserveImageData(displacmentGridImageData)
-            slicer.mrmlScene.AddNode(vv)
+        # gridTransform.Update()
+        # if exportVector:
+        #     transformNode = slicer.vtkMRMLGridTransformNode()
+        #     slicer.mrmlScene.AddNode(transformNode)
+        #     transformNode.SetName("Transform_" + str(i))
+        #     transformNode.SetAndObserveTransformFromParent(gridTransform)
+        #
+        #     vv = slicer.vtkMRMLVectorVolumeNode()
+        #     vv.SetSpacing(displacmentGridImageData.GetSpacing())
+        #     vv.SetOrigin(displacmentGridImageData.GetOrigin())
+        #     vv.SetIJKToRASDirectionMatrix(matrix)
+        #     vv.SetAndObserveImageData(displacmentGridImageData)
+        #     vv.SetName("Phase_" + str(i))
+        #     slicer.mrmlScene.AddNode(vv)
 
 
         if vectorField:
@@ -709,9 +749,29 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
         if not patient.loadDicom(i):
             print "Can't get CT for phase " + str(i) + "0 %"
-            continue
+            return
+
         ctNode = patient.fourDCT[i].node
-        ctNode.ApplyTransform(gridTransform)
+
+        if not i == referencePosition:
+            if not patient.getTransform(i):
+                print "Can't get transform for phase " + str(i) + "0 %"
+                return
+            patient.fourDCT[i].transform.Inverse()
+            ctNode.SetAndObserveTransformNodeID(patient.fourDCT[i].transform.GetID())
+            if not transformLogic.hardenTransform(ctNode):
+                print "Can't harden transform for phase " + str(i) + "0 %"
+                return
+
+            slicer.mrmlScene.RemoveNode(patient.fourDCT[i].transform)
+            patient.fourDCT[i].transform = None
+
+
+        # ctNode.ApplyTransform(gridAverageTransform)
+        ctNode.SetAndObserveTransformNodeID(transformNode.GetID())
+        if not transformLogic.hardenTransform(ctNode):
+            print "Can't harden transform for phase " + str(i) + "0 %"
+            return
 
         mathMultiply.RemoveAllInputs()
         mathAddCT.RemoveAllInputs()
