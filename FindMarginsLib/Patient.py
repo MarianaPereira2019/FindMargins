@@ -2,6 +2,8 @@ import os
 import unittest
 from __main__ import vtk, qt, ctk, slicer
 import numpy as np
+
+import threading
 import RegistrationHierarchy
 
 
@@ -15,6 +17,8 @@ class Patient():
       self.fourDCT[i] = self.dicom() # 0-9 4DCT, 10 Planning CT
     self.targetContour = ""
     self.regParameters = None
+    self.vectorDir = ""
+    self.refPhase = 6
 
   class dicom():
     def __init__(self):
@@ -54,20 +58,20 @@ class Patient():
     dicomWidget.detailsPopup.loadCheckedLoadables()
     return True
 
-  def createPlanParameters(self,referencePosition,vectorDir):
+  def createPlanParameters(self):
     self.regParameters = None
     self.regParameters = RegistrationHierarchy.registrationParameters(self.name)
-    self.regParameters.vectorDirectory = vectorDir
+    self.regParameters.vectorDirectory = self.vectorDir
     self.regParameters.movingNumber = "Plan"
-    self.regParameters.referenceNumber = str(referencePosition) + "0"
+    self.regParameters.referenceNumber = str(self.refPhase) + "0"
     self.regParameters.bsplineOn = True
     self.regParameters.stageThreeOn = True
 
-  def create4DParameters(self,referencePosition,vectorDir):
+  def create4DParameters(self):
     self.regParameters = None
     self.regParameters = RegistrationHierarchy.registrationParameters(self.name)
-    self.regParameters.movingNumber = str(referencePosition) + "0"
-    self.regParameters.vectorDirectory = vectorDir
+    self.regParameters.movingNumber = str(self.refPhase) + "0"
+    self.regParameters.vectorDirectory = self.vectorDir
     self.regParameters.bsplineOn = True
 
   def getTransform(self,position):
@@ -128,8 +132,7 @@ class Patient():
       self.fourDCT[position].vectorField = vf
       return True
 
-  def findNode(self,position):
-    finalNode = ""
+  def findNode(self, position):
     if position == 0:
       string = " 0.0%"
     elif position == 10: #Special case, if we need to find planning CT
@@ -151,5 +154,26 @@ class Patient():
             return nodes[node]
 
     return None
+
+  class myThread (threading.Thread):
+    def __init__(self, threadID, name, patient, threadLock):
+        threading.Thread.__init__(self)
+        self.threadID = threadID
+        self.name = name
+        self.patient = patient
+        self.threadLock = threadLock
+
+    def run(self):
+
+        print "Starting " + self.name
+        self.patient.regParameters.referenceNumber = str(self.threadID) + "0"
+        # Get lock to synchronize threads
+        self.threadLock.acquire()
+        if self.patient.getTransform(self.threadID):
+          print "Exiting " + self.name
+        else:
+          print "Exiting with faliure" + self.name
+        # Free lock to release next thread
+        self.threadLock.release()
 
 
