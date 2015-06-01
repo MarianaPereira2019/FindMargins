@@ -1,5 +1,6 @@
 import os
 import unittest
+import math
 
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
@@ -404,18 +405,24 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
 
             if serialDescription.find('%') > -1:
               for i in range(0, 100, 10):
-                tmpName = " " + str(i) + ".0%"
+                tmpName = str(i) + ".0%"
                 if serialDescription.find(tmpName) > -1:
+                  #Special case for 0.0%
+                  if i == 0:
+                    position = serialDescription.find(tmpName)
+                    try:
+                      int(serialDescription[position-1])
+                      continue
+                    except ValueError:
+                      if serialDescription.find(" " + tmpName) < 0 and not serialDescription == tmpName:
+                        continue
                   # print patientName + " found " + serialDescription + " so " + files[0]
                   newPatient.fourDCT[i/10].uid = series
                   newPatient.fourDCT[i/10].file = files[0]
 
                 if len(newPatient.vectorDir) == 0 and os.path.exists(files[0]):
-                    print files[0]
                     dicomDir = os.path.dirname(files[0])
-                    print dicomDir
                     newPatient.vectorDir = dicomDir + "/VectorFields/"
-                    print newPatient.vectorDir
                     if not os.path.exists(newPatient.vectorDir):
                         os.makedirs(newPatient.vectorDir)
                         print "Created " + newPatient.vectorDir
@@ -553,7 +560,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     origins = {}
     relOrigins = {}
-    minmaxAmplitudes = [[0,0,0],[0,0,0]]
+    minmaxAmplitudes = [[0, 0, 0], [0, 0, 0]]
 
     refPhase = patient.refPhase
     
@@ -564,10 +571,11 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         contour = self.propagateContour(patient, 10, showContours)
         if contour is None:
             print "Can't propagate contour to reference phase."
+            return
        
     patient.fourDCT[refPhase].contour = contour
     origins[refPhase] = self.getCenterOfMass(contour)
-    relOrigins[refPhase] = [0,0,0]
+    relOrigins[refPhase] = [0, 0, 0, 0]
 
     # Propagation in 4D
     # TODO: Add option to display contours, otherwise delete nodes
@@ -583,13 +591,13 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       #Create & propagate contour
       contour = self.propagateContour(patient, i, showContours)
       if contour is None:
-          print "Can't propagate contour for phase " + str(i) +"0 %"
+          print "Can't propagate contour for phase " + str(i) + "0 %"
           continue
 
       patient.fourDCT[i].contour = contour
 
       origins[i] = self.getCenterOfMass(contour)
-      relOriginsTmp = [0,0,0]
+      relOriginsTmp = [0, 0, 0, 0]
       for j in range(0,3):
         relOriginsTmp[j] = origins[i][j] - origins[refPhase][j]
         if relOriginsTmp[j] > minmaxAmplitudes[0][j]:
@@ -613,6 +621,14 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.RemoveNode(patient.fourDCT[refPhase].contour)
         patient.fourDCT[refPhase].contour = None
 
+    #Absolute motion
+    for j in range(0, 10):
+      amplitude = 0
+      for i in range(0,3):
+        amplitude += relOrigins[j][i]*relOrigins[j][i]
+      relOrigins[j][3] = math.sqrt(amplitude)
+
+
     # Plots
     ln = slicer.util.getNode(pattern='vtkMRMLLayoutNode*')
     ln.SetViewArrangement(24)
@@ -622,7 +638,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     # Create arrays of data
     dn = {}
-    for i in range(0,3):
+    for i in range(0, 4):
       dn[i] = slicer.mrmlScene.AddNode(slicer.vtkMRMLDoubleArrayNode())
       a = dn[i].GetArray()
       a.SetNumberOfTuples(10)
@@ -638,6 +654,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     cn.AddArray('x', dn[0].GetID())
     cn.AddArray('y', dn[1].GetID())
     cn.AddArray('z', dn[2].GetID())
+    cn.AddArray('abs', dn[3].GetID())
 
     # Configure properties of the Chart
     cn.SetProperty('default', 'title','Relative tumor motion')
@@ -647,6 +664,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     cn.SetProperty('x', 'color', '#0000ff')
     cn.SetProperty('y', 'color', '#00ff00')
     cn.SetProperty('z', 'color', '#ff0000')
+    cn.SetProperty('abs', 'color', '#000000')
 
     # Set the chart to display
     cvn.SetChartNodeID(cn.GetID())
