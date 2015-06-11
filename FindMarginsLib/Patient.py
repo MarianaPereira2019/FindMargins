@@ -1,7 +1,7 @@
 import os
 import unittest
 from __main__ import vtk, qt, ctk, slicer
-import numpy as np
+import math
 
 import threading
 import RegistrationHierarchy
@@ -18,7 +18,11 @@ class Patient():
     self.targetContour = ""
     self.regParameters = None
     self.vectorDir = ""
-    self.refPhase = 6
+    self.patientDir = ""
+    self.refPhase = 3
+    self.midVentilation = self.dicom()
+    self.amplitudes = [0, 0, 0]
+    self.ptvMargins = [0, 0, 0]
 
   class dicom():
     def __init__(self):
@@ -28,8 +32,8 @@ class Patient():
       self.transform = None
       self.contour = None
       self.vectorField = None
-      self.origin = [0,0,0]
-      self.relOrigin = [0,0,0]
+      self.origin = [0, 0, 0]
+      self.relOrigin = [0, 0, 0]
 
   def loadDicom(self,position):
     dicomWidget = slicer.modules.dicom.widgetRepresentation().self()
@@ -56,6 +60,19 @@ class Patient():
     dicomWidget.detailsPopup.offerLoadables(seriesUIDs, 'SeriesUIDList')
     dicomWidget.detailsPopup.examineForLoading()
     dicomWidget.detailsPopup.loadCheckedLoadables()
+    return True
+
+  def loadMidV(self, position):
+    if self.midVentilation.node is not None:
+      return True
+
+    fileName = self.patientDir + "/" + self.name + "_midV_ref" + str(position) + ".nrrd"
+    success, midV = slicer.util.loadVolume(fileName, properties = {'name' : self.name + "_midV_ref" + str(position)}, returnNode=True)
+    if not success:
+      print "Can't load mid Ventilation from disk (" + fileName + ")"
+      return False
+
+    self.midVentilation.node = midV
     return True
 
   def createPlanParameters(self):
@@ -86,7 +103,10 @@ class Patient():
         print "Can't load " + self.regParameters.bspline_F_name
         return False
 
-    self.fourDCT[position].transform = bspline
+    if position == 11:
+      self.midVentilation.transform = bspline
+    else:
+      self.fourDCT[position].transform = bspline
     return True
 
   def getVectorField(self,position):
@@ -116,7 +136,7 @@ class Patient():
           transform = self.fourDCT[position].transform
           node = self.fourDCT[position].node
 
-          vf = transformLogic.CreateDisplacementVolumeFromTransform(transform,node,False)
+          vf = transformLogic.CreateDisplacementVolumeFromTransform(transform, node, False)
 
           if vf is not None:
               slicer.util.saveNode(vf,self.regParameters.vf_F_name)
@@ -154,6 +174,16 @@ class Patient():
             return nodes[node]
 
     return None
+
+  def calculatePTVmargins(self, SSigma, Rsigma):
+    for i in range(0, 3):
+      if self.amplitudes[i] <= 0:
+        print "Amplitudes not set."
+        return False
+
+    for i in range(0, 3):
+      self.ptvMargins[i] = 2.1 * SSigma + 0.8 * math.sqrt(Rsigma*Rsigma + (self.amplitudes[i]/3)*(self.amplitudes[i]/3))
+    return True
 
   class myThread (threading.Thread):
     def __init__(self, threadID, name, patient, threadLock):
