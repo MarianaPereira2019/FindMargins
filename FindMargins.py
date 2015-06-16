@@ -47,30 +47,30 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     ScriptedLoadableModuleWidget.setup(self)
 
 
+    # #
+    # # Reload and Test area
+    # #
+    # reloadCollapsibleButton = ctk.ctkCollapsibleButton()
+    # reloadCollapsibleButton.text = "Reload && Test"
+    # self.layout.addWidget(reloadCollapsibleButton)
+    # reloadFormLayout = qt.QFormLayout(reloadCollapsibleButton)
     #
-    # Reload and Test area
+    # ## reload button
+    # ## (use this during development, but remove it when delivering
+    # ##  your module to users)
+    # self.reloadCTXButton = qt.QPushButton("Reload")
+    # self.reloadCTXButton.toolTip = "Reload this module."
+    # self.reloadCTXButton.name = "LoadCTX Reload"
+    # reloadFormLayout.addWidget(self.reloadCTXButton)
+    # self.reloadCTXButton.connect('clicked()', self.onReload)
     #
-    reloadCollapsibleButton = ctk.ctkCollapsibleButton()
-    reloadCollapsibleButton.text = "Reload && Test"
-    self.layout.addWidget(reloadCollapsibleButton)
-    reloadFormLayout = qt.QFormLayout(reloadCollapsibleButton)
-
-    ## reload button
-    ## (use this during development, but remove it when delivering
-    ##  your module to users)
-    self.reloadCTXButton = qt.QPushButton("Reload")
-    self.reloadCTXButton.toolTip = "Reload this module."
-    self.reloadCTXButton.name = "LoadCTX Reload"
-    reloadFormLayout.addWidget(self.reloadCTXButton)
-    self.reloadCTXButton.connect('clicked()', self.onReload)
-
-    ## reload and test button
-    ## (use this during development, but remove it when delivering
-    ##  your module to users)
-    self.reloadAndTestButton = qt.QPushButton("Reload and Test")
-    self.reloadAndTestButton.toolTip = "Reload this module and then run the self tests."
-    reloadFormLayout.addWidget(self.reloadAndTestButton)
-    self.reloadAndTestButton.connect('clicked()', self.onReloadAndTest)
+    # ## reload and test button
+    # ## (use this during development, but remove it when delivering
+    # ##  your module to users)
+    # self.reloadAndTestButton = qt.QPushButton("Reload and Test")
+    # self.reloadAndTestButton.toolTip = "Reload this module and then run the self tests."
+    # reloadFormLayout.addWidget(self.reloadAndTestButton)
+    # self.reloadAndTestButton.connect('clicked()', self.onReloadAndTest)
 
     self.tags = {}
     self.tags['seriesDescription'] = "0008,103e"
@@ -160,10 +160,19 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     # Registration from planning CT to all ref phase
     #
 
-    self.planToAll = qt.QCheckBox()
-    self.planToAll.toolTip = "Select if you want to register planning CT to all phases of 4D CT."
-    self.planToAll.setCheckState(0)
-    parametersFormLayout.addRow("Full 4D: ",self.planToAll)
+    # self.planToAll = qt.QCheckBox()
+    # self.planToAll.toolTip = "Select if you want to register planning CT to all phases of 4D CT."
+    # self.planToAll.setCheckState(0)
+    # parametersFormLayout.addRow("Full 4D: ",self.planToAll)
+    
+    #
+    # Keep amplitudes 
+    #
+
+    self.keepAmplituedCheckBox = qt.QCheckBox()
+    self.keepAmplituedCheckBox.toolTip = "Select if you want to use motion from markers or some other organs for PTV definition."
+    self.keepAmplituedCheckBox.setCheckState(0)
+    parametersFormLayout.addRow("Keep amplitudes: ",self.keepAmplituedCheckBox)
 
     
     #
@@ -182,7 +191,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     
     self.SSigmaSpinBox = qt.QSpinBox()     
     self.SSigmaSpinBox.setToolTip("Systematic error to be used in PTV calculations.")
-    self.SSigmaSpinBox.setValue(1)
+    self.SSigmaSpinBox.setValue(2)
     self.SSigmaSpinBox.setRange(0, 10)
     parametersFormLayout.addRow("Systematic Error [mm]:", self.SSigmaSpinBox)
     
@@ -192,7 +201,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     
     self.RsigmaSpinBox = qt.QSpinBox()     
     self.RsigmaSpinBox.setToolTip("Random error to be used in PTV calculations.")
-    self.RsigmaSpinBox.setValue(1)
+    self.RsigmaSpinBox.setValue(0)
     self.RsigmaSpinBox.setRange(0, 10)
     parametersFormLayout.addRow("Random Error [mm]:", self.RsigmaSpinBox)
     
@@ -251,6 +260,14 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow(self.ptvButton)
     
     #
+    # Color Button
+    #
+    self.colorButton = qt.QPushButton("Change contour color and thickness")
+    self.colorButton.toolTip = "Changes contour color and thickness of closed surface for better display."
+    self.colorButton.enabled = True
+    parametersFormLayout.addRow(self.colorButton)
+    
+    #
     # Register planning CT to midV Button
     #
     self.registerMidButton = qt.QPushButton("Register Planning CT to MidV")
@@ -282,6 +299,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     self.averageButton.connect('clicked(bool)', self.onAverageButton)
     self.itvButton.connect('clicked(bool)', self.onItvButton)
     self.ptvButton.connect('clicked(bool)', self.onPtvButton)
+    self.colorButton.connect('clicked(bool)', self.onColorButton)
     self.registerMidButton.connect('clicked(bool)', self.onRegisterMidButton)
     self.inputPlanCTSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onPlanCTChange)
     self.inputContourSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onContourChange)
@@ -386,8 +404,8 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
       return
 
     planToAll = False
-    if self.planToAll.checkState() == 2:
-      planToAll = True
+    # if self.planToAll.checkState() == 2:
+    #   planToAll = True
     logic.register(patient, planToAll)
 
   def onMidVButton(self):
@@ -399,11 +417,11 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
       print "Can't find patient."
       return
 
-    planToAll = False
-    if self.planToAll.checkState() == 2:
-      logic.createMidVentilationFromPlanningCT(patient)
-    else:
-      logic.createMidVentilation(patient)
+    # planToAll = False
+    # if self.planToAll.checkState() == 2:
+    #   logic.createMidVentilationFromPlanningCT(patient)
+    # else:
+    logic.createMidVentilation(patient)
 
   def onAverageButton(self):
     logic = FindMarginsLogic()
@@ -463,7 +481,12 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
 
     patient.fourDCT[10].contour = targetContour
 
-    logic.createPTV(patient, SSigma, Rsigma)
+    if self.keepAmplituedCheckBox.checkState() == 2:
+      keepAmplitudes = True
+    else:
+      keepAmplitudes = False
+
+    logic.createPTV(patient, SSigma, Rsigma, keepAmplitudes)
 
     self.item={}
     for i in range(0,3):
@@ -471,6 +494,12 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
       self.item[i].setText(str(round(patient.ptvMargins[i], 2)))
       self.table.setItem(0, i, self.item[i])
 
+  def onColorButton(self):
+    logic = FindMarginsLogic()
+    targetContour = self.inputContourSelector.currentNode()
+    logic.setColorAndThickness(targetContour)
+      
+  
   def getPatientList(self):
 
     nPatient = 0
@@ -715,7 +744,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     #Find & save peak-to-peak amplitudes
     amplitudesTmp = [-1, -1, -1]
     for j in range(0, 3):
-      amplitudesTmp[j] = minmaxAmplitudes[0][j] + abs(minmaxAmplitudes[1][j])
+      amplitudesTmp[j] = abs(minmaxAmplitudes[0][j] - minmaxAmplitudes[1][j])
       if amplitudesTmp[j] > amplitudes[j]:
         amplitudes[j] = amplitudesTmp[j]
 
@@ -733,7 +762,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     # Plot
     if showPlot:
       self.plotMotion(relOrigins, contourName)
-    logging.info('Processing completed')
 
     return minmaxAmplitudes
 
@@ -812,8 +840,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.RemoveNode(vectorField)
         patient.fourDCT[i].vectorField = None
 
-
-
     # print vector.GetID()
     #
     # vector.SetAndObserveImageData(vectorImageData)
@@ -833,7 +859,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     midVCT = slicer.vtkMRMLScalarVolumeNode()
     slicer.mrmlScene.AddNode(midVCT)
     midVCT.SetName(patient.name + "_midV_ref"+str(refPhase))
-
 
     firstRun = True
     for i in range(0, 10):
@@ -976,8 +1001,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.RemoveNode(vectorField)
         patient.fourDCT[i].vectorField = None
 
-
-
     # print vector.GetID()
     #
     # vector.SetAndObserveImageData(vectorImageData)
@@ -1003,9 +1026,11 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     if patient.getTransform(11):
       print "Mid Ventilation transform loaded."
+      return
 
     if not patient.loadDicom(10):
       print "Can't get planning CT."
+      return
 
     print "Starting registration."
     patient.regParameters.movingNode = patient.fourDCT[10].node.GetID()
@@ -1013,8 +1038,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     patient.regParameters.register()
 
     print "Registration finished"
-
-
 
   def createAverageFrom4DCT(self,patient):
     mathMultiply = vtk.vtkImageMathematics()
@@ -1060,12 +1083,11 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         patient.fourDCT[i].node = None
     midVCT.SetAndObserveImageData(ctImageData)
 
-  def createPTV(self, patient, SSigma, Rsigma):
+  def createPTV(self, patient, SSigma, Rsigma, keepAmplitudes):
     import vtkSlicerContourMorphologyModuleLogic
     from vtkSlicerContoursModuleMRML import vtkMRMLContourNode
 
     # First we need planning CT for reference
-    print "0"
     if not patient.loadDicom(10):
         print "Can't get planning CT."
         return
@@ -1077,11 +1099,10 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     #   return
     # patient.fourDCT[10].contour = contour
 
-    print "1"
     contour = patient.fourDCT[10].contour
     #Calculate motion
-    self.calculateMotion(patient, True, False, False)
-    print "2"
+    if not keepAmplitudes:
+      self.calculateMotion(patient, True, False, False)
     #Create contourmorphology node and set parameters
     cmNode = vtkSlicerContourMorphologyModuleLogic.vtkMRMLContourMorphologyNode()
     cmLogic = vtkSlicerContourMorphologyModuleLogic.vtkSlicerContourMorphologyModuleLogic()
@@ -1094,7 +1115,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     cmLogic.SetAndObserveContourMorphologyNode(cmNode)
     cmLogic.SetAndObserveMRMLScene(slicer.mrmlScene)
 
-
     # # Create contour node
     # ptv = vtkMRMLContourNode()
     # slicer.mrmlScene.AddNode(ptv)
@@ -1104,22 +1124,60 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     cmNode.SetAndObserveContourANode(contour)
     # cmNode.SetAndObserveOutputContourNode(ptv)
 
+
     if not patient.calculatePTVmargins(SSigma, Rsigma):
       print "Can't calculate margins."
       return
 
-    print "3"
     cmNode.SetXSize(patient.ptvMargins[0])
     cmNode.SetYSize(patient.ptvMargins[1])
     cmNode.SetZSize(patient.ptvMargins[2])
     cmLogic.MorphContour()
-    print "4"
 
-    # ptv.SetName(patient.name + "_PTV" + str(SSigma) + "_" + str(Rsigma))
+    print patient.ptvMargins
+    #Find newly created contour and rename it
+
+    ptv = slicer.util.getNode('Expanded*Contour')
+    if not ptv:
+      print "Can't find PTV contour"
+      return
+
+    name = patient.name + "_PTV_S" + str(SSigma) + "_s" + str(Rsigma)
+    name = slicer.mrmlScene.GenerateUniqueName(name)
+    ptv.SetName(name)
 
     print "Done creating PTV."
 
+  def setColorAndThickness(self, contour):
+    if not contour:
+      print "No Contour was set."
+      return
+
+    index = contour.GetName().find('_Contour')
+    if index < 0:
+      print "Can't find name of contour"
+      return
+
+    contourName = contour.GetName()[0:index]
+    ribbonNode = slicer.util.getNode(contourName + '*Ribbon*')
+    closedNode = slicer.util.getNode(contourName + '*Closed*')
+
+    if not closedNode:
+      print "No closed surface node was set for " + contourName
+      return
+
+    #Set thickness
+    closedNode.SetSliceIntersectionThickness(3)
+
+    #Set color; Either copy it or set new one
+    if ribbonNode:
+      closedNode.SetColor(ribbonNode.GetColor())
+    else:
+      closedNode.SetColor([1, 1, 0])
+
+
   def createITV(self,patient, skipPlanRegistration, showContours):
+    #TODO: Doesn't work, needs fixing.
     import vtkSlicerContourMorphologyModuleLogic
     from vtkSlicerContoursModuleMRML import vtkMRMLContourNode
 
@@ -1137,12 +1195,8 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     cmNode.SetAndObserveReferenceVolumeNode(patient.fourDCT[10].node)
     cmNode.SetOperation(cmNode.Union)
 
-    print "komej"
-
     cmLogic.SetAndObserveContourMorphologyNode(cmNode)
     cmLogic.SetAndObserveMRMLScene(slicer.mrmlScene)
-
-    print "Do sm pa ne "
 
     refPhase = patient.refPhase
 
@@ -1162,8 +1216,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     itv.DeepCopy(contour)
     itv.SetName(patient.name + "_ITV")
     self.setDisplayNode(itv)
-
-    print "do sm se pridemo"
 
     cmNode.SetAndObserveContourANode(itv)
     cmNode.SetAndObserveOutputContourNode(itv)
@@ -1190,7 +1242,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     if not showContours:
         slicer.mrmlScene.RemoveNode(patient.fourDCT[refPhase].contour)
         patient.fourDCT[refPhase].contour = None
-
 
   def propagateContour(self, patient, position, showContours, contour = None):
     from vtkSlicerContoursModuleMRML import vtkMRMLContourNode
@@ -1257,8 +1308,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       contour.SetAndObserveDisplayNodeID(displayNode.GetID())
       contour.CreateRibbonModelDisplayNode()
 
-
-
   def getCenterOfMass(self,contour):
       comFilter = vtk.vtkCenterOfMass()
       comFilter.SetInputData(contour.GetRibbonModelPolyData())
@@ -1288,19 +1337,22 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     cn = slicer.mrmlScene.AddNode(slicer.vtkMRMLChartNode())
 
     # Add data to the Chart
-    cn.AddArray('x', dn[0].GetID())
-    cn.AddArray('y', dn[1].GetID())
-    cn.AddArray('z', dn[2].GetID())
+    cn.AddArray('L-R', dn[0].GetID())
+    cn.AddArray('A-P', dn[1].GetID())
+    cn.AddArray('I-S', dn[2].GetID())
     cn.AddArray('abs', dn[3].GetID())
 
     # Configure properties of the Chart
     cn.SetProperty('default', 'title','Relative ' + contourName + ' motion')
     cn.SetProperty('default', 'xAxisLabel', 'phase')
     cn.SetProperty('default', 'yAxisLabel', 'position [mm]')
+    cn.SetProperty('default', 'showGrid', 'on')
+    cn.SetProperty('default', 'xAxisPad', '1')
+    cn.SetProperty('default', 'showMarkers', 'on')
 
-    cn.SetProperty('x', 'color', '#0000ff')
-    cn.SetProperty('y', 'color', '#00ff00')
-    cn.SetProperty('z', 'color', '#ff0000')
+    cn.SetProperty('L-R', 'color', '#0000ff')
+    cn.SetProperty('A-P', 'color', '#00ff00')
+    cn.SetProperty('I-S', 'color', '#ff0000')
     cn.SetProperty('abs', 'color', '#000000')
 
     # Set the chart to display
@@ -1376,4 +1428,3 @@ class FindMarginsTest(ScriptedLoadableModuleTest):
     logic = FindMarginsLogic()
     self.assertTrue( logic.hasImageData(volumeNode) )
     self.delayDisplay('Test passed!')
-

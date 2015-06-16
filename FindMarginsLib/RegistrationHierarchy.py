@@ -377,8 +377,6 @@ class registrationParameters():
         self.saveNodes()
         #Switch
 
-
-
     def checkVf(self):
       fileName = self.vectorDirectory + self.patientName + "_" + self.movingNumber + "to" + self.referenceNumber +  "_vf.nrrd"
       self.vf_F_name = fileName
@@ -421,7 +419,6 @@ class registrationParameters():
             if logic.saveAndWriteNode(self.vectorVolume, self.movingHierarchy, name, filePath, True, self.resample):
                 print "Saved vector field."
 
-
     def switchPhase(self):
         if not self.parameters:
             print "No parameters"
@@ -463,21 +460,21 @@ class registrationParameters():
         parameters["enable_stage_0"] = False
 
         parameters["stage_1_resolution"] = '4,4,2'
-        parameters["stage_1_grid_size"] = '100'
-        parameters["stage_1_regularization"] = '0.1'
+        parameters["stage_1_grid_size"] = '50'
+        parameters["stage_1_regularization"] = '0.005'
         parameters["stage_1_its"] = '200'
         parameters["plmslc_output_warped_1"] = ''
 
         parameters["enable_stage_2"] = self.stageTwoOn
         parameters["stage_2_resolution"] = '2,2,1'
-        parameters["stage_2_grid_size"] = '50'
-        parameters["stage_1_regularization"] = '0.1'
+        parameters["stage_2_grid_size"] = '25'
+        parameters["stage_1_regularization"] = '0.005'
         parameters["stage_2_its"] = '100'
         parameters["plmslc_output_warped_2"] = ''
 
         parameters["enable_stage_3"] = self.stageThreeOn
         parameters["stage_3_resolution"] = '1,1,1'
-        parameters["stage_3_grid_size"] = '50'
+        parameters["stage_3_grid_size"] = '15'
         parameters["stage_1_regularization"] = '0.1'
         parameters["stage_3_its"] = '50'
         parameters["plmslc_output_warped_3"] = ''
