@@ -176,6 +176,7 @@ class Patient():
     return None
 
   def calculatePTVmargins(self, SSigma, Rsigma):
+    self.ptvMargins={}
     for i in range(0, 3):
       if self.amplitudes[i] <= 0:
         print "Amplitudes not set."

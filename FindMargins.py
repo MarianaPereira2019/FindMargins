@@ -674,9 +674,10 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     relOrigins = {}
     minmaxAmplitudes = [[-1e3, -1e3, -1e3], [1e3, 1e3, 1e3]]
     amplitudes = [0, 0, 0]
+    patient.amplitudes = {}
+    parentNodeID = ""
 
     refPhase = patient.refPhase
-
 
     #This is the relative difference between planning CT and reference position
     #Amplitudes are shifted for this value, so we can get an estimate, where is our planning CT in 4DCT
@@ -686,12 +687,24 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     planOrigins = self.getCenterOfMass(patient.fourDCT[10].contour)
     print planOrigins
     contourName = patient.fourDCT[10].contour.GetName().replace("_Contour", "")
+
+    #Find parent hierarchy, if we want to show contours
+    if showContours:
+      subjectHierarchyNode = slicer.util.getNode(contourName + "*_SubjectHierarchy")
+      if subjectHierarchyNode:
+        parentNodeID = subjectHierarchyNode.GetParentNodeID()
+
+    #If there's a labelmap, then contours are not propagated right.
+    #This is a workaround
+    contourLabelmap = patient.fourDCT[10].contour.GetLabelmapImageData()
+    if contourLabelmap:
+      patient.fourDCT[10].contour.SetAndObserveLabelmapImageData(None)
     
     if skipPlanRegistration:
         contour = patient.fourDCT[10].contour
     else:
         #Propagate contour
-        contour = self.propagateContour(patient, 10, showContours)
+        contour = self.propagateContour(patient, 10, showContours, None, parentNodeID)
         if contour is None:
             print "Can't propagate contour to reference phase."
             return None
@@ -712,7 +725,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         continue
 
       #Create & propagate contour
-      contour = self.propagateContour(patient, i, showContours)
+      contour = self.propagateContour(patient, i, showContours, None, parentNodeID)
       if contour is None:
         print "Can't propagate contour for phase " + str(i) + "0 %"
         continue
@@ -762,6 +775,9 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     # Plot
     if showPlot:
       self.plotMotion(relOrigins, contourName)
+
+    if contourLabelmap:
+      patient.fourDCT[10].contour.SetAndObserveLabelmapImageData(contourLabelmap)
 
     return minmaxAmplitudes
 
@@ -1102,7 +1118,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     contour = patient.fourDCT[10].contour
     #Calculate motion
     if not keepAmplitudes:
-      self.calculateMotion(patient, True, False, False)
+      self.calculateMotion(patient, True, False, True)
     #Create contourmorphology node and set parameters
     cmNode = vtkSlicerContourMorphologyModuleLogic.vtkMRMLContourMorphologyNode()
     cmLogic = vtkSlicerContourMorphologyModuleLogic.vtkSlicerContourMorphologyModuleLogic()
@@ -1111,19 +1127,10 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     cmNode.SetScene(slicer.mrmlScene)
     cmNode.SetAndObserveReferenceVolumeNode(patient.fourDCT[10].node)
     cmNode.SetOperation(cmNode.Expand)
+    cmNode.SetAndObserveContourANode(contour)
 
     cmLogic.SetAndObserveContourMorphologyNode(cmNode)
     cmLogic.SetAndObserveMRMLScene(slicer.mrmlScene)
-
-    # # Create contour node
-    # ptv = vtkMRMLContourNode()
-    # slicer.mrmlScene.AddNode(ptv)
-    # # ptv.DeepCopy(contour)
-    # ptv.SetName(patient.name + "_PTV")
-    # self.setDisplayNode(ptv)
-    cmNode.SetAndObserveContourANode(contour)
-    # cmNode.SetAndObserveOutputContourNode(ptv)
-
 
     if not patient.calculatePTVmargins(SSigma, Rsigma):
       print "Can't calculate margins."
@@ -1243,7 +1250,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.RemoveNode(patient.fourDCT[refPhase].contour)
         patient.fourDCT[refPhase].contour = None
 
-  def propagateContour(self, patient, position, showContours, contour = None):
+  def propagateContour(self, patient, position, showContours, contour = None, parentNodeID = ""):
     from vtkSlicerContoursModuleMRML import vtkMRMLContourNode
     transformLogic = slicer.modules.transforms.logic()
 
@@ -1285,9 +1292,18 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
       if showContours:
         self.setDisplayNode(contour)
+        #Create subject hierarchy and add to contour set
+        if len(parentNodeID) > 0:
+          contourName = contour.GetName().replace("_Contour", "_SubjectHierarchy")
+          subjectHierarchyNode = slicer.vtkMRMLSubjectHierarchyNode()
+          subjectHierarchyNode.SetName(contourName)
+          subjectHierarchyNode.SetLevel('SubSeries')
+          # subjectHierarchyNode.SetAttribute('Directory',ctDirectory)
+          slicer.mrmlScene.AddNode(subjectHierarchyNode)
+          subjectHierarchyNode.SetParentNodeID(parentNodeID)
+          subjectHierarchyNode.SetAssociatedNodeID(contour.GetID())
 
     contour.SetAndObserveTransformNodeID(bspline.GetID())
-
     if not transformLogic.hardenTransform(contour):
         print "Can't harden transform."
         slicer.mrmlScene.RemoveNode(bspline)
@@ -1296,7 +1312,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     slicer.mrmlScene.RemoveNode(bspline)
     return contour
 
-  def setDisplayNode(self, contour):
+  def setDisplayNode(self, contour, parentHierarchy = None):
       from vtkSlicerContoursModuleMRML import vtkMRMLContourModelDisplayNode
 
       if contour is None:
@@ -1317,7 +1333,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
   def plotMotion(self, relOrigins, contourName):
     ln = slicer.util.getNode(pattern='vtkMRMLLayoutNode*')
-    ln.SetViewArrangement(24)
+    ln.SetViewArrangement(25)
 
     # Get the first ChartView node
     cvn = slicer.util.getNode(pattern='vtkMRMLChartViewNode*')
