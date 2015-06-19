@@ -23,6 +23,8 @@ class Patient():
     self.midVentilation = self.dicom()
     self.amplitudes = [0, 0, 0]
     self.ptvMargins = [0, 0, 0]
+    self.linearTransform = None #Matrix for transforming contour to new axis of motion
+    # self.maxminAmplitudes = [[0, 0, 0], [0, 0, 0]]
 
   class dicom():
     def __init__(self):

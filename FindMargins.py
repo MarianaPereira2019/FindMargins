@@ -1,6 +1,7 @@
 import os
 import unittest
 import math
+import numpy as np
 
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
@@ -173,6 +174,15 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     self.keepAmplituedCheckBox.toolTip = "Select if you want to use motion from markers or some other organs for PTV definition."
     self.keepAmplituedCheckBox.setCheckState(0)
     parametersFormLayout.addRow("Keep amplitudes: ",self.keepAmplituedCheckBox)
+    
+    #
+    # Find axis of motion 
+    #
+
+    self.axisOfMotionCheckBox = qt.QCheckBox()
+    self.axisOfMotionCheckBox.toolTip = "Select if you want to find axis of motion with principal component analysis."
+    self.axisOfMotionCheckBox.setCheckState(2)
+    parametersFormLayout.addRow("Find Axis of Motion: ",self.axisOfMotionCheckBox)
 
     
     #
@@ -215,9 +225,9 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     #
     # Load DICOM
     #
-    self.loadDicomButton = qt.QPushButton("Load Dicom data")
-    self.loadDicomButton.toolTip = "Loads the dicom planning CT and contours."
-    parametersFormLayout.addRow(self.loadDicomButton)
+    self.loadContoursButton = qt.QPushButton("Load Contours")
+    self.loadContoursButton.toolTip = "Loads contours from DICOM data."
+    parametersFormLayout.addRow(self.loadContoursButton)
     #
     # Apply Button
     #
@@ -293,7 +303,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
 
     # connections
     self.applyButton.connect('clicked(bool)', self.onFindAmplitudes)
-    self.loadDicomButton.connect('clicked(bool)', self.onLoadDicomButton)
+    self.loadContoursButton.connect('clicked(bool)', self.onLoadContoursButton)
     self.registerButton.connect('clicked(bool)', self.onRegisterButton)
     self.midVButton.connect('clicked(bool)', self.onMidVButton)
     self.averageButton.connect('clicked(bool)', self.onAverageButton)
@@ -347,23 +357,32 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     patient = self.patientList[patientNumber]
 
     if patient is None:
-      print "Can't find patient."
+      self.errorMessage("Can't find patient.")
       return
 
     skipPlanRegistration = False
     if self.contourIn4D.checkState() == 2:
-        skipPlanRegistration = True
+      skipPlanRegistration = True
 
     showContours = False
     if self.showContours.checkState() == 2:
-        showContours = True
+      showContours = True
+
+    axisOfMotion = False
+    if self.axisOfMotionCheckBox.checkState() == 2:
+      axisOfMotion = True
 
     if patient.fourDCT[10].contour is None:
-      print "No contour was set."
+      self.errorMessage("No contour was set.")
       return
+    
     #Calculate amplitudes
-    maxminAmplitudes = logic.calculateMotion(patient, skipPlanRegistration, showContours)
+    exitString = logic.calculateMotion(patient, skipPlanRegistration, showContours, axisOfMotion)
+    if len(exitString) > 0:
+      self.errorMessage(exitString)
+      return
 
+    maxminAmplitudes = patient.maxminAmplitudes
     if not maxminAmplitudes:
         print "Can't get amplitudes."
         return
@@ -377,16 +396,16 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
             n += 1
 
 
-  def onLoadDicomButton(self):
+  def onLoadContoursButton(self):
     patientNumber = self.patientComboBox.currentIndex
     patient = self.patientList[patientNumber]
 
     if  len(patient.structureSet.uid) == 0:
-      print "Can't Structure Set DICOM data for " + patient.name
+      self.errorMessage("Can't get Structure Set DICOM data for " + patient.name)
       return
 
     if not patient.loadStructureSet():
-      print "Can't load Structure Set"
+      self.errorMessage("Can't load Contours - check python console")
       return
 
 
@@ -400,7 +419,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     patient = self.patientList[patientNumber]
 
     if patient is None:
-      print "Can't find patient."
+      self.errorMessage("Can't find patient.")
       return
 
     planToAll = False
@@ -414,7 +433,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     patient = self.patientList[patientNumber]
 
     if patient is None:
-      print "Can't find patient."
+      self.errorMessage("Can't find patient.")
       return
 
     # planToAll = False
@@ -429,7 +448,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     patient = self.patientList[patientNumber]
 
     if patient is None:
-      print "Can't find patient."
+      self.errorMessage("Can't find patient.")
       return
 
     logic.createAverageFrom4DCT(patient)
@@ -440,7 +459,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     patient = self.patientList[patientNumber]
 
     if patient is None:
-      print "Can't find patient."
+      self.errorMessage("Can't find patient.")
       return
 
     logic.registerMidV(patient)
@@ -452,7 +471,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     patient = self.patientList[patientNumber]
 
     if patient is None:
-      print "Can't find patient."
+      self.errorMessage("Can't find patient.")
       return
 
     skipPlanRegistration = False
@@ -473,7 +492,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     targetContour = self.inputContourSelector.currentNode()
 
     if patient is None:
-      print "Can't find patient."
+      self.errorMessage("Can't find patient.")
       return
 
     SSigma = self.SSigmaSpinBox.value
@@ -486,7 +505,11 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     else:
       keepAmplitudes = False
 
-    logic.createPTV(patient, SSigma, Rsigma, keepAmplitudes)
+    axisOfMotion = False
+    if self.axisOfMotionCheckBox.checkState() == 2:
+      axisOfMotion = True
+
+    logic.createPTV(patient, SSigma, Rsigma, keepAmplitudes, axisOfMotion)
 
     self.item={}
     for i in range(0,3):
@@ -560,31 +583,12 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
 
       nPatient += 1
 
-# def setSeriesComboBox(self,index):
-  #   for serial in self.patientList[index].series:
-  #     self.seriesComboBox.addItem(serial.description)
-
-  def onReload(self,moduleName="FindMargins"):
-    """Generic reload method for any scripted module.
-    ModuleWizard will subsitute correct default moduleName.
-    """
-    globals()[moduleName] = slicer.util.reloadScriptedModule(moduleName)
-
-  def onReloadAndTest(self,moduleName="FingMargins"):
-    try:
-      self.onReload()
-      evalString = 'globals()["%s"].%sTest()' % (moduleName, moduleName)
-      tester = eval(evalString)
-      tester.runTest()
-    except Exception, e:
-      import traceback
-      traceback.print_exc()
-      qt.QMessageBox.warning(slicer.util.mainWindow(),
-          "Reload and Test", 'Exception!\n\n' + str(e) + "\n\nSee Python Console for Stack Trace")
-
-
-
-
+  def errorMessage(self, message):
+    print(message)
+    self.info = qt.QErrorMessage()
+    self.infoLayout = qt.QVBoxLayout()
+    self.info.setLayout(self.infoLayout)
+    self.info.showMessage(message)
 #
 # FindMarginsLogic
 #
@@ -668,11 +672,12 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     return
 
 
-  def calculateMotion(self, patient, skipPlanRegistration, showContours, showPlot = True):
-    logging.info('Processing started')
-    origins = {}
-    relOrigins = {}
-    minmaxAmplitudes = [[-1e3, -1e3, -1e3], [1e3, 1e3, 1e3]]
+  def calculateMotion(self, patient, skipPlanRegistration, showContours, axisOfMotion = False, showPlot = True):
+    # logging.info('Processing started')
+    self.delayDisplay("Calculating motion")
+    origins = np.zeros([3, 10])
+    relOrigins = np.zeros([3, 10])
+    patient.minmaxAmplitudes = [[-1e3, -1e3, -1e3], [1e3, 1e3, 1e3]]
     amplitudes = [0, 0, 0]
     patient.amplitudes = {}
     parentNodeID = ""
@@ -710,18 +715,14 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
             return None
 
     patient.fourDCT[refPhase].contour = contour
-    origins[refPhase] = self.getCenterOfMass(contour)
-    relOrigins[refPhase] = [0, 0, 0, 0]
-    for i in range(0, 3):
-      relOrigins[refPhase][i] += origins[refPhase][i] - planOrigins[i]
-    #
-    # relOrigins[refPhase] = [-1, -3, 2, 0]
+    origins[:, refPhase] = self.getCenterOfMass(contour)
+    relOrigins[:, refPhase] = [0, 0, 0]
+    relOrigins[:, refPhase] += origins[:, refPhase] - planOrigins
+
     # Propagation in 4D
     patient.create4DParameters()
     for i in range(0, 10):
       if i == refPhase:
-        print origins[i]
-        print relOrigins[i]
         continue
 
       #Create & propagate contour
@@ -729,30 +730,40 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       if contour is None:
         print "Can't propagate contour for phase " + str(i) + "0 %"
         continue
-
       patient.fourDCT[i].contour = contour
-      origins[i] = self.getCenterOfMass(contour)
-      relOriginsTmp = [0, 0, 0, 0]
-      for j in range(0, 3):
-        relOriginsTmp[j] = origins[i][j] - origins[refPhase][j] + relOrigins[refPhase][j]
-        if relOriginsTmp[j] > minmaxAmplitudes[0][j]:
-            minmaxAmplitudes[0][j] = relOriginsTmp[j]
-        elif relOriginsTmp[j] < minmaxAmplitudes[1][j]:
-            minmaxAmplitudes[1][j] = relOriginsTmp[j]
-
-      relOrigins[i] = relOriginsTmp
-      print origins[i]
-      print relOrigins[i]
-      patient.fourDCT[i].origin = origins[i]
-      patient.fourDCT[i].relOrigin = relOrigins[i]
-
+      origins[:, i] = self.getCenterOfMass(contour)
       if not showContours:
           slicer.mrmlScene.RemoveNode(contour)
           patient.fourDCT[i].contour = None
-
     if not showContours and not skipPlanRegistration:
         slicer.mrmlScene.RemoveNode(patient.fourDCT[refPhase].contour)
         patient.fourDCT[refPhase].contour = None
+
+    # Find axis of motion
+    if axisOfMotion:
+      matrix_W = self.findAxisOfMotion(origins)
+      origins = np.dot(matrix_W.T, origins)
+      patient.matrix = matrix_W
+
+    #Find relative motion
+    for i in range(0, 10):
+      relOrigins[:, i] = origins[:, i] - origins[:, refPhase] + relOrigins[:, refPhase]
+
+    # Absolute motion & max & min motion
+    relOrigins = np.vstack([relOrigins, np.zeros([1, 10])])
+    for j in range(0, 10):
+      amplitude = 0
+      for i in range(0, 3):
+        #Max
+        if relOrigins[i, j] > minmaxAmplitudes[0][i]:
+          minmaxAmplitudes[0][i] = relOrigins[i, j]
+        #Min
+        if relOrigins[i, j] < minmaxAmplitudes[0][i]:
+          minmaxAmplitudes[1][i] = relOrigins[i, j]
+        amplitude += relOrigins[i, j]*relOrigins[i, j]
+      relOrigins[3, j] = np.sqrt(amplitude)
+      patient.fourDCT[j].origin = origins[:, i]
+      patient.fourDCT[j].relOrigin = relOrigins[:, i]
 
     #Find & save peak-to-peak amplitudes
     amplitudesTmp = [-1, -1, -1]
@@ -760,18 +771,9 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       amplitudesTmp[j] = abs(minmaxAmplitudes[0][j] - minmaxAmplitudes[1][j])
       if amplitudesTmp[j] > amplitudes[j]:
         amplitudes[j] = amplitudesTmp[j]
-
     patient.amplitudes = amplitudes
+    patient.minmaxAmplitudes = minmaxAmplitudes
     print amplitudes
-
-    #Absolute motion
-    for j in range(0, 10):
-      amplitude = 0
-      for i in range(0,3):
-        # relOrigins[j][i] += abs(minmaxAmplitudes[1][i])
-        amplitude += relOrigins[j][i]*relOrigins[j][i]
-      relOrigins[j][3] = math.sqrt(amplitude)
-
     # Plot
     if showPlot:
       self.plotMotion(relOrigins, contourName)
@@ -1099,7 +1101,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         patient.fourDCT[i].node = None
     midVCT.SetAndObserveImageData(ctImageData)
 
-  def createPTV(self, patient, SSigma, Rsigma, keepAmplitudes):
+  def createPTV(self, patient, SSigma, Rsigma, keepAmplitudes, axisOfMotion):
     import vtkSlicerContourMorphologyModuleLogic
     from vtkSlicerContoursModuleMRML import vtkMRMLContourNode
 
@@ -1118,7 +1120,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     contour = patient.fourDCT[10].contour
     #Calculate motion
     if not keepAmplitudes:
-      self.calculateMotion(patient, True, False, True)
+      self.calculateMotion(patient, True, False, axisOfMotion, True)
     #Create contourmorphology node and set parameters
     cmNode = vtkSlicerContourMorphologyModuleLogic.vtkMRMLContourMorphologyNode()
     cmLogic = vtkSlicerContourMorphologyModuleLogic.vtkSlicerContourMorphologyModuleLogic()
@@ -1346,7 +1348,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       a.SetNumberOfTuples(10)
       for j in range(0,10):
         a.SetComponent(j, 0, j)
-        a.SetComponent(j, 1, relOrigins[j][i])
+        a.SetComponent(j, 1, relOrigins[i, j])
         a.SetComponent(j, 2, 0)
 
     # Create the ChartNode,
@@ -1374,7 +1376,83 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     # Set the chart to display
     cvn.SetChartNodeID(cn.GetID())
 
-  def delayDisplay(self,message,msec=1000):
+  def findAxisOfMotion(self, origins):
+    #Following guide from: http://sebastianraschka.com/Articles/2014_pca_step_by_step.html
+
+    #scale factor for better display:
+    scale = 100
+
+    #Calculate mean position
+    meanVector = [0, 0 ,0]
+    for i in range(3):
+      meanVector[i] = np.mean(origins[i, :])
+
+    print origins
+    print meanVector
+    #Computing covariance matrix
+    convMatrix = np.cov([origins[0, :], origins[1, :], origins[2, :]])
+    print('Covariance Matrix:\n', convMatrix)
+    # for i in range(origins.shape[1]):
+    #   scatter_matrix += (origins[: ,i].reshape(3, 1) - meanVector).dot((origins[:, i].reshape(3, 1) - meanVector).T)
+
+    #Get eigenvectors
+    eig_val, eig_vec = np.linalg.eig(convMatrix)
+    for i in range(len(eig_vec)):
+      print "Eigen vector " + str(i+1)
+      print eig_vec[i]
+      print "Eigen value " + str(i+1)
+      print eig_val[i]
+
+    # Make a list of (eigenvalue, eigenvector) tuples
+    eig_pairs = [(np.abs(eig_val[i]), eig_vec[:,i]) for i in range(len(eig_val))]
+
+    # Sort the (eigenvalue, eigenvector) tuples from high to low
+    eig_pairs.sort()
+    eig_pairs.reverse()
+    matrix_w = np.hstack((eig_pairs[0][1].reshape(3, 1),
+                          eig_pairs[1][1].reshape(3, 1),
+                          eig_pairs[2][1].reshape(3, 1)))
+    print('Matrix W:\n', matrix_w)
+
+    #Create linear transform for contour propagation
+
+    vtkMatrix = vtk.vtkMatrix4x4()
+    transform = slicer.vtkMRMLLinearTransformNode()
+    slicer.mrmlScene.AddNode(transform)
+
+    for i in range(3):
+      for j in range(3):
+        vtkMatrix.SetElement(j, i, matrix_w[i, j])
+
+    transform.SetAndObserveMatrixTransformFromParent(vtkMatrix)
+
+    #Plot eigenvectors from mean position
+    fiducials = slicer.vtkMRMLMarkupsFiducialNode()
+    displayNode = slicer.vtkMRMLMarkupsDisplayNode()
+	# vtkNew<vtkMRMLMarkupsFiducialStorageNode> wFStorageNode;
+    slicer.mrmlScene.AddNode(displayNode)
+    slicer.mrmlScene.AddNode(fiducials)
+    fiducials.SetAndObserveDisplayNodeID(displayNode.GetID())
+
+    fiducials.AddFiducialFromArray(meanVector, "Mean Position")
+    for i in range(len(eig_vec)):
+      # fiducials.AddFiducialFromArray(meanVector + scale * eig_vec[i], " P " + str(i+1))
+      #Plot ruler
+      ruler = slicer.vtkMRMLAnnotationRulerNode()
+      displayRuler = slicer.vtkMRMLAnnotationLineDisplayNode()
+      displayRuler.SetLabelVisibility(0)
+      displayRuler.SetMaxTicks(0)
+      displayRuler.SetLineWidth(5)
+      slicer.mrmlScene.AddNode(displayRuler)
+      slicer.mrmlScene.AddNode(ruler)
+      ruler.SetAndObserveDisplayNodeID(displayRuler.GetID())
+
+      ruler.SetPosition1(meanVector)
+      ruler.SetPosition2(meanVector + scale * eig_vec[i])
+
+    return matrix_w
+
+  def delayDisplay(self, message, msec=1000):
     """This utility method displays a small dialog and waits.
     This does two things: 1) it lets the event loop catch up
     to the state of the test so that rendering and widget updates
