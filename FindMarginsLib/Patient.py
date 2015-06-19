@@ -37,7 +37,7 @@ class Patient():
       self.origin = [0, 0, 0]
       self.relOrigin = [0, 0, 0]
 
-  def loadDicom(self,position):
+  def loadDicom(self, position):
     dicomWidget = slicer.modules.dicom.widgetRepresentation().self()
 
     if not self.fourDCT[position].node == None or self.findNode(position):
