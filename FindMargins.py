@@ -161,10 +161,10 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     # Registration from planning CT to all ref phase
     #
 
-    # self.planToAll = qt.QCheckBox()
-    # self.planToAll.toolTip = "Select if you want to register planning CT to all phases of 4D CT."
-    # self.planToAll.setCheckState(0)
-    # parametersFormLayout.addRow("Full 4D: ",self.planToAll)
+    self.planToAll = qt.QCheckBox()
+    self.planToAll.toolTip = "Select if you want to register planning CT to all phases of 4D CT."
+    self.planToAll.setCheckState(0)
+    parametersFormLayout.addRow("MidV from planning CT: ",self.planToAll)
     
     #
     # Keep amplitudes 
@@ -181,7 +181,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
 
     self.axisOfMotionCheckBox = qt.QCheckBox()
     self.axisOfMotionCheckBox.toolTip = "Select if you want to find axis of motion with principal component analysis."
-    self.axisOfMotionCheckBox.setCheckState(2)
+    self.axisOfMotionCheckBox.setCheckState(0)
     parametersFormLayout.addRow("Find Axis of Motion: ",self.axisOfMotionCheckBox)
 
     
@@ -365,7 +365,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
             # print patient.name + "has now" + patient.fourDCT[10].node.GetName()
       self.findAmplitudesButton.enabled = True
       self.createPTVButton.enabled = self.inputPlanCTSelector.currentNode()
-      self.colorButton = True
+      self.colorButton.enabled = True
 
   def onRefPhaseChange(self, refPhase):
       patientNumber = self.patientComboBox.currentIndex
@@ -436,8 +436,8 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
       return
 
     planToAll = False
-    # if self.planToAll.checkState() == 2:
-    #   planToAll = True
+    if self.planToAll.checkState() == 2:
+      planToAll = True
     exitString = logic.register(patient, planToAll)
     if exitString:
       self.qtMessage(exitString)
@@ -452,11 +452,10 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
       self.qtMessage("Can't find patient.")
       return
 
-    # planToAll = False
-    # if self.planToAll.checkState() == 2:
-    #   logic.createMidVentilationFromPlanningCT(patient)
-    # else:
-    exitString = logic.createMidVentilation(patient)
+    if self.planToAll.checkState() == 2:
+      exitString = logic.createMidVentilationFromPlanningCT(patient)
+    else:
+      exitString = logic.createMidVentilation(patient)
     if exitString:
       self.qtMessage(exitString)
       return
@@ -517,9 +516,12 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     patient = self.patientList[patientNumber]
     #Copy values from table to patient (user can also change this values)
     for i in range(3):
+      if not self.item[i].text():
+        self.qtMessage("No inputs in table.")
+        return
       try:
         number = float(self.item[i].text())
-      except AttributeError:
+      except AttributeError or ValueError:
         self.qtMessage("Please input numbers for amplitude")
       patient.amplitudes[i] = number
     SSigma = self.SSigmaSpinBox.value
@@ -555,13 +557,15 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
       axisOfMotion = True
 
     exitString = logic.createPTV(patient, SSigma, Rsigma, keepAmplitudes, axisOfMotion)
-    if exitString:
+    if exitString and exitString.find("Created ") < 0:
       self.qtMessage(exitString)
       return
 
     for i in range(3):
       self.item[i].setText(str(round(patient.amplitudes[i], 2)))
       self.item[i+3].setText(str(round(patient.ptvMargins[i], 2)))
+
+    self.qtMessage(exitString)
 
   def onColorButton(self):
     logic = FindMarginsLogic()
@@ -655,7 +659,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     self.delayDisplay("Starting registration")
 
-    for i in range(0,10):
+    for i in range(0, 10):
       #This is when we want register all phases to planning ct
       if not planToAll:
         if not i == refPhase:
@@ -681,8 +685,15 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         patient.regParameters.movingNode = patient.fourDCT[10].node.GetID()
         patient.regParameters.referenceNode = patient.fourDCT[patient.refPhase].node.GetID()
         patient.regParameters.register()
-        # slicer.mrmlScene.RemoveNode(patient.fourDCT[10].node)
-        # patient.fourDCT[10].node = None
+
+        if planToAll:
+          slicer.mrmlScene.RemoveNode(patient.fourDCT[i].node)
+          patient.fourDCT[i].node = None
+
+    #We don't need 4D registration, when plan to all
+    if planToAll:
+      self.setDisplay()
+      return "Finished with registration"
 
     # Prepare everything for 4D registration
     patient.refPhase = refPhase
@@ -794,6 +805,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       if matrix_W is None:
         self.setDisplay()
         return "Can't calculate axis of motion"
+      #This is turn off for the moment, because we can't add margins in arbitrary direction
       origins = np.dot(matrix_W.T, origins)
       patient.matrix = matrix_W
 
@@ -1020,11 +1032,9 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     gridAverageTransform = slicer.vtkOrientedGridTransform()
 
-    refPhase = patient.refPhase
-
     #Check if midVentilation is already on disk
     if patient.loadMidV(10):
-      return
+      return "Loaded mid Ventilation from disk"
 
     self.delayDisplay("Starting calculation of mid Ventilation from planning CT")
 
@@ -1037,6 +1047,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         self.setDisplay("Getting vector field for phase" + str(i) + "0 %")
         if not patient.getVectorField(i):
           return "Can't get vector field for phase " + str(i) + "0 %"
+          self.setDisplay()
 
         mathMultiply.RemoveAllInputs()
         mathAddVector.RemoveAllInputs()
@@ -1057,8 +1068,8 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
             firstRun = False
         else:
             mathAddVector.SetOperationToAdd()
-            mathAddVector.SetInput1Data( mathMultiply.GetOutput())
-            mathAddVector.SetInput2Data( vectorImageData)
+            mathAddVector.SetInput1Data(mathMultiply.GetOutput())
+            mathAddVector.SetInput2Data(vectorImageData)
             mathAddVector.Modified()
             mathAddVector.Update()
             vectorImageData.DeepCopy(mathAddVector.GetOutput())
@@ -1078,11 +1089,24 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     transformNode = slicer.vtkMRMLGridTransformNode()
     slicer.mrmlScene.AddNode(transformNode)
     transformNode.SetAndObserveTransformFromParent(gridAverageTransform)
-    # return
 
-    # midVCT = slicer.vtkMRMLScalarVolumeNode()
-    # slicer.mrmlScene.AddNode(midVCT)
-    # midVCT.SetName(patient.name + "_midV_ref"+str(refPhase))
+    # Load planning CT
+    self.setDisplay("Propagating planning CT to MidV phase.")
+    if not patient.loadDicom(10):
+      self.setDisplay()
+      return "Can't find planning CT."
+    #Save transformation as vector field (it crashes when saving as transform)
+    transformLogic = slicer.modules.transforms.logic()
+    vf = transformLogic.CreateDisplacementVolumeFromTransform(transformNode, patient.fourDCT[10].node, False)
+    slicer.util.saveNode(vf, patient.vectorDir + "/" + vf.GetName() + ".nrrd")
+    slicer.mrmlScene.RemoveNode(vf)
+
+    midVCT = slicer.vtkMRMLScalarVolumeNode()
+    midVCT.Copy(patient.fourDCT[10].node)
+    slicer.mrmlScene.AddNode(midVCT)
+    midVCT.SetName(patient.name + "_midV_ref10")
+    midVCT.SetAndObserveTransformNodeID(transformNode.GetID())
+    transformLogic.hardenTransform(midVCT)
     self.setDisplay()
     return "Created midVentilation from planning CT."
 
@@ -1167,10 +1191,8 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     #   print "Can't get contour."
     #   return
     # patient.fourDCT[10].contour = contour
-
-    self.delayDisplay("Calculating PTV from " + contour.GetName())
-
     contour = patient.fourDCT[10].contour
+    self.delayDisplay("Calculating PTV from " + contour.GetName())
     #Calculate motion
     if not keepAmplitudes:
       self.calculateMotion(patient, True, False, axisOfMotion, True)
@@ -1447,7 +1469,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     # Sort the (eigenvalue, eigenvector) tuples from high to low
     eig_pairs.sort()
-    eig_pairs.reverse()
+    # eig_pairs.reverse()
     matrix_w = np.hstack((eig_pairs[0][1].reshape(3, 1),
                           eig_pairs[1][1].reshape(3, 1),
                           eig_pairs[2][1].reshape(3, 1)))
@@ -1472,7 +1494,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     slicer.mrmlScene.AddNode(displayNode)
     slicer.mrmlScene.AddNode(fiducials)
     fiducials.SetAndObserveDisplayNodeID(displayNode.GetID())
-
     fiducials.AddFiducialFromArray(meanVector, "Mean Position")
     for i in range(len(eig_vec)):
       # fiducials.AddFiducialFromArray(meanVector + scale * eig_vec[i], " P " + str(i+1))
@@ -1485,7 +1506,6 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       slicer.mrmlScene.AddNode(displayRuler)
       slicer.mrmlScene.AddNode(ruler)
       ruler.SetAndObserveDisplayNodeID(displayRuler.GetID())
-
       ruler.SetPosition1(meanVector)
       ruler.SetPosition2(meanVector + scale * eig_vec[i])
 
