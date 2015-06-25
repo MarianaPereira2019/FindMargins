@@ -61,7 +61,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     # ##  your module to users)
     # self.reloadCTXButton = qt.QPushButton("Reload")
     # self.reloadCTXButton.toolTip = "Reload this module."
-    # self.reloadCTXButton.name = "LoadCTX Reload"
+    # self.reloadCTXButton.ID = "LoadCTX Reload"
     # reloadFormLayout.addWidget(self.reloadCTXButton)
     # self.reloadCTXButton.connect('clicked()', self.onReload)
     #
@@ -104,7 +104,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     self.getPatientList()
 
     for patient in self.patientList:
-      self.patientComboBox.addItem(patient.name)
+      self.patientComboBox.addItem(patient.ID)
 
     #
     # input volume selector
@@ -231,6 +231,14 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     self.midVButton.toolTip = "Creates the Mid ventilation CT from 4DCT and registration files."
     self.midVButton.enabled = True
     parametersFormLayout.addRow(self.midVButton)
+
+    #
+    # Export MidV Button
+    #
+    self.exportMidVButton = qt.QPushButton("Export MidV CT as DICOM")
+    self.exportMidVButton.toolTip = "Exports mid ventilation as dicom series."
+    self.exportMidVButton.enabled = True
+    parametersFormLayout.addRow(self.exportMidVButton)
     
     #
     # Average 4DCT Button
@@ -321,6 +329,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     self.loadContoursButton.connect('clicked(bool)', self.onLoadContoursButton)
     self.registerButton.connect('clicked(bool)', self.onRegisterButton)
     self.midVButton.connect('clicked(bool)', self.onMidVButton)
+    self.exportMidVButton.connect('clicked(bool)', self.onExportMidVButton)
     self.averageButton.connect('clicked(bool)', self.onAverageButton)
     self.itvButton.connect('clicked(bool)', self.onItvButton)
     self.calcMarginsButton.connect('clicked(bool)', self.onCalcMarginsButton)
@@ -364,7 +373,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
           patient = self.patientList[patientNumber]
           if patient is not None:
             patient.fourDCT[10].contour = targetContour
-            # print patient.name + "has now" + patient.fourDCT[10].node.GetName()
+            # print patient.ID + "has now" + patient.fourDCT[10].node.GetName()
       self.findAmplitudesButton.enabled = True
       self.createPTVButton.enabled = self.inputPlanCTSelector.currentNode()
       self.colorButton.enabled = True
@@ -417,7 +426,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     patient = self.patientList[patientNumber]
 
     if  len(patient.structureSet.uid) == 0:
-      self.qtMessage("Can't get Structure Set DICOM data for " + patient.name)
+      self.qtMessage("Can't get Structure Set DICOM data for " + patient.ID)
       return
 
     if not patient.loadStructureSet():
@@ -461,6 +470,26 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     if exitString:
       self.qtMessage(exitString)
       return
+
+  def onExportMidVButton(self):
+    patientNumber = self.patientComboBox.currentIndex
+    patient = self.patientList[patientNumber]
+    if patient is None:
+      self.qtMessage("Can't find patient.")
+      return
+
+    #Load mid Ventilation first
+    if patient.midVentilation.node is None:
+      self.onMidVButton()
+      if patient.midVentilation.node is None:
+        self.qtMessage("Can't load/make midVentilation CT.")
+        return
+
+    #And export it
+    if patient.exportMidV():
+      self.qtMessage("Exported MidVentilation as DICOM to: " + patient.midVentilation.directory)
+    else:
+      self.qtMessage("Can't export MidVentilation, check python console")
 
   def onAverageButton(self):
     logic = FindMarginsLogic()
@@ -576,8 +605,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     if exitString:
       self.qtMessage(exitString)
       return
-      
-  
+
   def getPatientList(self):
 
     nPatient = 0
@@ -591,7 +619,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
           if len(files) > 0:
             instance = slicer.dicomDatabase.instanceForFile(files[0])
             try:
-              patientName = slicer.dicomDatabase.instanceValue(instance, self.tags['patientID'])
+              patientID = slicer.dicomDatabase.instanceValue(instance, self.tags['patientID'])
             except RuntimeError:
                 # this indicates that the particular instance is no longer
                 # accessible to the dicom database, so we should ignore it here
@@ -628,7 +656,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
                     except ValueError:
                       if serialDescription.find(" " + tmpName) < 0 and not serialDescription == tmpName:
                         continue
-                  # print patientName + " found " + serialDescription + " so " + files[0]
+                  # print patientID + " found " + serialDescription + " so " + files[0]
                   newPatient.fourDCT[i/10].uid = series
                   # print "4D phase found: ", i/10
                   newPatient.fourDCT[i/10].file = files[0]
@@ -643,7 +671,8 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
                         print "Created " + newPatient.vectorDir
 
       newPatient.databaseNumber = nPatient
-      newPatient.name = patientName
+      newPatient.ID = patientID
+      newPatient.name = slicer.dicomDatabase.instanceValue(instance, self.tags['patientName'])
       self.patientList.append(newPatient)
 
       nPatient += 1
@@ -844,7 +873,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     #Find & save peak-to-peak amplitudes
     amplitudesTmp = [-1, -1, -1]
-    for j in range(0, 3):
+    for j in range(3):
       amplitudesTmp[j] = abs(minmaxAmplitudes[0][j] - minmaxAmplitudes[1][j])
       if amplitudesTmp[j] > amplitudes[j]:
         amplitudes[j] = amplitudesTmp[j]
@@ -951,7 +980,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     midVCT = slicer.vtkMRMLScalarVolumeNode()
     slicer.mrmlScene.AddNode(midVCT)
-    midVCT.SetName(patient.name + "_midV_ref"+str(refPhase))
+    midVCT.SetName(patient.ID + "_midV_ref"+str(refPhase))
 
     firstRun = True
     for i in range(0, 10):
@@ -1117,7 +1146,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     midVCT = slicer.vtkMRMLScalarVolumeNode()
     midVCT.Copy(patient.fourDCT[10].node)
     slicer.mrmlScene.AddNode(midVCT)
-    midVCT.SetName(patient.name + "_midV_ref10")
+    midVCT.SetName(patient.ID + "_midV_ref10")
     midVCT.SetAndObserveTransformNodeID(transformNode.GetID())
     transformLogic.hardenTransform(midVCT)
     self.setDisplay()
@@ -1150,7 +1179,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     self.delayDisplay("Starting process")
     midVCT = slicer.vtkMRMLScalarVolumeNode()
     slicer.mrmlScene.AddNode(midVCT)
-    midVCT.SetName(patient.name + "average4DCT")
+    midVCT.SetName(patient.ID + "average4DCT")
     firstRun = True
     for i in range(0, 10):
         if not patient.loadDicom(i):
@@ -1239,7 +1268,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     if not ptv:
       return "Can't find PTV contour in subject Hierarchy"
 
-    name = patient.name + "_PTV_S" + str(SSigma) + "_s" + str(Rsigma)
+    name = patient.ID + "_PTV_S" + str(SSigma) + "_s" + str(Rsigma)
     name = slicer.mrmlScene.GenerateUniqueName(name)
     ptv.SetName(name)
     self.setDisplay()
@@ -1306,7 +1335,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
     itv = vtkMRMLContourNode()
     slicer.mrmlScene.AddNode(itv)
     itv.DeepCopy(contour)
-    itv.SetName(patient.name + "_ITV")
+    itv.SetName(patient.ID + "_ITV")
     self.setDisplayNode(itv)
 
     cmNode.SetAndObserveContourANode(itv)
