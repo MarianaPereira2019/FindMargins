@@ -10,6 +10,7 @@ import RegistrationHierarchy
 class Patient():
   def __init__(self):
     self.name = ""
+    self.ID = ""
     self.databaseNumber = 0
     self.structureSet = self.dicom()
     self.fourDCT = {}
@@ -36,6 +37,8 @@ class Patient():
       self.vectorField = None
       self.origin = [0, 0, 0]
       self.relOrigin = [0, 0, 0]
+      self.directory = ""
+      self.dicomParameters = {}
 
   def loadDicom(self, position):
     dicomWidget = slicer.modules.dicom.widgetRepresentation().self()
@@ -68,8 +71,8 @@ class Patient():
     if self.midVentilation.node is not None:
       return True
 
-    fileName = self.patientDir + "/" + self.name + "_midV_ref" + str(position) + ".nrrd"
-    success, midV = slicer.util.loadVolume(fileName, properties = {'name' : self.name + "_midV_ref" + str(position)}, returnNode=True)
+    fileName = self.patientDir + "/" + self.ID + "_midV_ref" + str(position) + ".nrrd"
+    success, midV = slicer.util.loadVolume(fileName, properties = {'name' : self.ID + "_midV_ref" + str(position)}, returnNode=True)
     if not success:
       print "Can't load mid Ventilation from disk (" + fileName + ")"
       return False
@@ -77,9 +80,28 @@ class Patient():
     self.midVentilation.node = midV
     return True
 
+  def exportMidV(self):
+    if self.midVentilation.node is None:
+      print "Load mid Ventilation first."
+      return False
+
+    #Create directory, if it doesn't exist
+    directory = self.patientDir + "/DICOM_midV"
+    if not os.path.exists(directory):
+      os.makedirs(directory)
+      print "Created " + directory
+    self.midVentilation.directory = directory
+
+    #Create Parameters and export dicom
+    if not self.createDicom(self.midVentilation, "midVentilation"):
+      print "Can't create Dicom series"
+      return False
+
+    return True
+
   def createPlanParameters(self):
     self.regParameters = None
-    self.regParameters = RegistrationHierarchy.registrationParameters(self.name)
+    self.regParameters = RegistrationHierarchy.registrationParameters(self.ID)
     self.regParameters.vectorDirectory = self.vectorDir
     self.regParameters.movingNumber = "Plan"
     self.regParameters.referenceNumber = str(self.refPhase) + "0"
@@ -88,7 +110,7 @@ class Patient():
 
   def create4DParameters(self):
     self.regParameters = None
-    self.regParameters = RegistrationHierarchy.registrationParameters(self.name)
+    self.regParameters = RegistrationHierarchy.registrationParameters(self.ID)
     self.regParameters.movingNumber = str(self.refPhase) + "0"
     self.regParameters.vectorDirectory = self.vectorDir
     self.regParameters.bsplineOn = True
@@ -111,15 +133,15 @@ class Patient():
       self.fourDCT[position].transform = bspline
     return True
 
-  def getVectorField(self,position):
+  def getVectorField(self, position, saveVectorField = False):
+      #saveVectorField is turned off, because it takes up a lot of disk space (cca 1 GB per patient)
+
       transformLogic = slicer.modules.transforms.logic()
 
       #First check if vector field already exist on disk, if not then create it
       vfName = self.regParameters.checkVf()
       if len(vfName) > 0:
-
           vf = self.findVectorNode(vfName)
-
           if vf is None:
             success, vf = slicer.util.loadVolume(self.regParameters.vf_F_name, properties = {'name' : vfName}, returnNode=True)
             if not success:
@@ -139,9 +161,9 @@ class Patient():
           node = self.fourDCT[position].node
 
           vf = transformLogic.CreateDisplacementVolumeFromTransform(transform, node, False)
-
           if vf is not None:
-              slicer.util.saveNode(vf,self.regParameters.vf_F_name)
+              if saveVectorField:
+                slicer.util.saveNode(vf,self.regParameters.vf_F_name)
               slicer.mrmlScene.RemoveNode(node)
               slicer.mrmlScene.RemoveNode(transform)
 
@@ -188,24 +210,40 @@ class Patient():
       self.ptvMargins[i] = 2.1 * SSigma + 0.8 * math.sqrt(Rsigma*Rsigma + (self.amplitudes[i]/3)*(self.amplitudes[i]/3))
     return True
 
+  def createDicom(self, dicomClass, studyDescription):
+    if len(dicomClass.directory) == 0:
+      print "No directory for DICOM export."
+      return False
+    dicomClass.dicomParameters = {}
+    dicomClass.dicomParameters["patientName"] = self.name
+    dicomClass.dicomParameters["patientID"] = self.ID
+    dicomClass.dicomParameters["studyDescription"] = studyDescription
+    dicomClass.dicomParameters["inputVolume"] = dicomClass.node.GetID()
+    dicomClass.dicomParameters["dicomDirectory"] = dicomClass.directory
+    dicomClass.dicomParameters["dicomPrefix"] = self.ID
+
+    dicomSeries = slicer.modules.createdicomseries
+    slicer.cli.run(dicomSeries, None, dicomClass.dicomParameters, wait_for_completion=True)
+    return True
+
   class myThread (threading.Thread):
     def __init__(self, threadID, name, patient, threadLock):
         threading.Thread.__init__(self)
         self.threadID = threadID
-        self.name = name
+        self.ID = name
         self.patient = patient
         self.threadLock = threadLock
 
     def run(self):
 
-        print "Starting " + self.name
+        print "Starting " + self.ID
         self.patient.regParameters.referenceNumber = str(self.threadID) + "0"
         # Get lock to synchronize threads
         self.threadLock.acquire()
         if self.patient.getTransform(self.threadID):
-          print "Exiting " + self.name
+          print "Exiting " + self.ID
         else:
-          print "Exiting with faliure" + self.name
+          print "Exiting with faliure" + self.ID
         # Free lock to release next thread
         self.threadLock.release()
 
