@@ -78,6 +78,8 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     self.tags['patientName'] = "0010,0010"
     self.tags['patientID'] = "0010,0020"
     self.tags['seriesDate'] = "0008,0022"
+    self.tags['studyDescription'] = "0008,1030"
+    self.tags['modality'] = "0008,0060"
 
     # Instantiate and connect widgets ...
 
@@ -218,14 +220,14 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     #
     # Do registration
     #
-    self.registerButton = qt.QPushButton("Register")
+    self.registerButton = qt.QPushButton("1: Register planCT and 4DCT")
     self.registerButton.toolTip = "Does the registration on planning CT and 4DCT."
     parametersFormLayout.addRow(self.registerButton)
 
     #
     # MidV Button
     #
-    self.midVButton = qt.QPushButton("Create MidV CT")
+    self.midVButton = qt.QPushButton("2a: Create MidVentilation CT")
     self.midVButton.toolTip = "Creates the Mid ventilation CT from 4DCT and registration files."
     self.midVButton.enabled = True
     parametersFormLayout.addRow(self.midVButton)
@@ -233,7 +235,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     #
     # Average 4DCT Button
     #
-    self.averageButton = qt.QPushButton("Create Average 4D CT")
+    self.averageButton = qt.QPushButton("3a: Create Average of 4D CT")
     self.averageButton.toolTip = "Creates time average CT from 4DCTs."
     self.averageButton.enabled = True
     parametersFormLayout.addRow(self.averageButton)
@@ -241,31 +243,22 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     #
     # Register planning CT to midV Button
     #
-    self.registerMidButton = qt.QPushButton("Register Planning CT to MidV")
+    self.registerMidButton = qt.QPushButton("4a: Register Planning CT to MidV")
     self.registerMidButton.toolTip = "Register planning CT to mid ventilation phase."
     self.registerMidButton.enabled = True
     self.registerMidButton.visible = True
     parametersFormLayout.addRow(self.registerMidButton)
     
     #
-    # ITV Button
-    #
-    self.itvButton = qt.QPushButton("Create ITV")
-    self.itvButton.toolTip = "Creates the ITV from CTV and registration files."
-    self.itvButton.enabled = False
-    self.itvButton.visible = False
-    parametersFormLayout.addRow(self.itvButton)
-
-    #
     # Load DICOM
     #
-    self.loadContoursButton = qt.QPushButton("Load Contours")
+    self.loadContoursButton = qt.QPushButton("2b: Load Contours")
     self.loadContoursButton.toolTip = "Loads contours from DICOM data."
     parametersFormLayout.addRow(self.loadContoursButton)
     #
     # Amplitudes Button
     #
-    self.findAmplitudesButton = qt.QPushButton("Find amplitudes")
+    self.findAmplitudesButton = qt.QPushButton("2c: Find breathing amplitudes of slected volume")
     self.findAmplitudesButton.toolTip = "Run the algorithm."
     self.findAmplitudesButton.enabled = False
     parametersFormLayout.addRow(self.findAmplitudesButton)
@@ -273,18 +266,27 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
     #
     # Calculate margins
     #
-    self.calcMarginsButton = qt.QPushButton("Calculate margins")
+    self.calcMarginsButton = qt.QPushButton("2d: Calculate margins according to M = 2.1SIGMA+0.8sigma")
     self.calcMarginsButton.toolTip = "Calculates margins from the margin recepie."
     self.calcMarginsButton.enabled = True
     parametersFormLayout.addRow(self.calcMarginsButton)
     #
     # PTV Button
     #
-    self.createPTVButton = qt.QPushButton("Create margin PTV")
+    self.createPTVButton = qt.QPushButton("2e: Create margin PTV")
     self.createPTVButton.toolTip = "Creates the PTV from CTV and registration files (needs planning CT)."
     self.createPTVButton.enabled = False
     parametersFormLayout.addRow(self.createPTVButton)
     
+    #
+    # ITV Button
+    #
+    self.itvButton = qt.QPushButton("2f: Create oldfashioned ITV from CTV and registration")
+    self.itvButton.toolTip = "Creates the ITV from CTV and registration files."
+    self.itvButton.enabled = False
+    self.itvButton.visible = False
+    parametersFormLayout.addRow(self.itvButton)
+
     #
     # Color Button
     #
@@ -595,6 +597,14 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
                 # accessible to the dicom database, so we should ignore it here
               continue
             serialDescription = slicer.dicomDatabase.instanceValue(instance, self.tags['seriesDescription'])
+            studyDescription = slicer.dicomDatabase.instanceValue(instance, self.tags['studyDescription'])
+            modality = slicer.dicomDatabase.instanceValue(instance, self.tags['modality'])
+            if studyDescription.upper().find('PLAN') > -1 and studyDescription.upper().find('REPLAN') <= -1 and modality == "CT" and serialDescription.find('%') <= -1:
+              newPatient.fourDCT[10].uid = series
+              newPatient.fourDCT[10].file = files[0]
+              newPatient.fourDCT[10].name = serialDescription
+              print "CT plan for patient " + patientName + ": " + studyDescription + ", seriesID: ", series
+
             # print "Series date: " + slicer.dicomDatabase.instanceValue(instance,self.tags['seriesDate'])
             # if len(slicer.dicomDatabase.instanceValue(instance,self.tags['seriesDate'])) > 0:
             #   print "Hello"
@@ -605,7 +615,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
             if serialDescription.find('Structure Sets') > -1:
               newPatient.structureSet.uid = series
 
-            if serialDescription.find('%') > -1:
+            if serialDescription.find('%') > -1:        # phase of 4D scan
               for i in range(0, 100, 10):
                 tmpName = str(i) + ".0%"
                 if serialDescription.find(tmpName) > -1:
@@ -620,9 +630,11 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
                         continue
                   # print patientName + " found " + serialDescription + " so " + files[0]
                   newPatient.fourDCT[i/10].uid = series
+                  # print "4D phase found: ", i/10
                   newPatient.fourDCT[i/10].file = files[0]
                   if len(newPatient.patientDir) == 0:
                     newPatient.patientDir = os.path.dirname(files[0])
+
                 if len(newPatient.vectorDir) == 0 and os.path.exists(files[0]):
                     dicomDir = os.path.dirname(files[0])
                     newPatient.vectorDir = dicomDir + "/VectorFields/"
@@ -749,7 +761,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       return "Can't find contour"
 
     planOrigins = self.getCenterOfMass(patient.fourDCT[10].contour)
-    print planOrigins
+    print "planorigins: ", planOrigins
     contourName = patient.fourDCT[10].contour.GetName().replace("_Contour", "")
     self.setDisplay("Calculating motion of " + contourName)
 
@@ -776,6 +788,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
 
     patient.fourDCT[refPhase].contour = contour
     origins[:, refPhase] = self.getCenterOfMass(contour)
+    print "reference origins: ", origins[:, refPhase]
     relOrigins[:, refPhase] = [0, 0, 0]
     relOrigins[:, refPhase] += origins[:, refPhase] - planOrigins
 
@@ -805,7 +818,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
       if matrix_W is None:
         self.setDisplay()
         return "Can't calculate axis of motion"
-      #This is turn off for the moment, because we can't add margins in arbitrary direction
+      #This is turned off for the moment, because we can't add margins in arbitrary direction
       origins = np.dot(matrix_W.T, origins)
       patient.matrix = matrix_W
 
@@ -822,7 +835,7 @@ class FindMarginsLogic(ScriptedLoadableModuleLogic):
         if relOrigins[i, j] > minmaxAmplitudes[0][i]:
           minmaxAmplitudes[0][i] = relOrigins[i, j]
         #Min
-        if relOrigins[i, j] < minmaxAmplitudes[0][i]:
+        if relOrigins[i, j] < minmaxAmplitudes[1][i]:
           minmaxAmplitudes[1][i] = relOrigins[i, j]
         amplitude += relOrigins[i, j]*relOrigins[i, j]
       relOrigins[3, j] = np.sqrt(amplitude)

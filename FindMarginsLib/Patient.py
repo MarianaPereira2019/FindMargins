@@ -24,12 +24,14 @@ class Patient():
     self.amplitudes = [0, 0, 0]
     self.ptvMargins = [0, 0, 0]
     self.linearTransform = None #Matrix for transforming contour to new axis of motion
+    self.planUid = ""
     # self.maxminAmplitudes = [[0, 0, 0], [0, 0, 0]]
 
   class dicom():
     def __init__(self):
       self.uid = ""
       self.file = ""
+      self.name = ""
       self.node = None
       self.transform = None
       self.contour = None
@@ -39,16 +41,23 @@ class Patient():
 
   def loadDicom(self, position):
     dicomWidget = slicer.modules.dicom.widgetRepresentation().self()
-
+    print "  LoadDicom position", position, self.fourDCT[position].node, self.findNode(position)
     if not self.fourDCT[position].node == None or self.findNode(position):
       return True
 
     seriesUIDs = [self.fourDCT[position].uid]
+
+    #if position == 10:
+    print "Plan CT (position 10)", position, seriesUIDs
+
+    # load the dicom data
     dicomWidget.detailsPopup.offerLoadables(seriesUIDs, 'SeriesUIDList')
     dicomWidget.detailsPopup.examineForLoading()
     dicomWidget.detailsPopup.loadCheckedLoadables()
+
+    # find the corresponding node
     if not self.findNode(position):
-        print "Can't find Node"
+        print "Can't find CT Node"
         return False
     return True
 
@@ -158,10 +167,11 @@ class Patient():
     if position == 0:
       string = " 0.0%"
     elif position == 10: #Special case, if we need to find planning CT
-      string = "Unknown"
+      string = self.fourDCT[position].name
     else:
       string = " " + str(position) + "0.0%"
     nodes = slicer.util.getNodes('vtkMRMLScalarVolumeNode*')
+    print "findNode", position, nodes
     for node in nodes:
       if node.find(string) > -1:
         self.fourDCT[position].node = nodes[node]
