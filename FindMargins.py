@@ -631,7 +631,7 @@ class FindMarginsWidget(ScriptedLoadableModuleWidget):
               newPatient.fourDCT[10].uid = series
               newPatient.fourDCT[10].file = files[0]
               newPatient.fourDCT[10].name = serialDescription
-              print "CT plan for patient " + patientName + ": " + studyDescription + ", seriesID: ", series
+              print "CT plan for patient " + patientID + ": " + studyDescription + ", seriesID: ", series
 
             # print "Series date: " + slicer.dicomDatabase.instanceValue(instance,self.tags['seriesDate'])
             # if len(slicer.dicomDatabase.instanceValue(instance,self.tags['seriesDate'])) > 0:
